@@ -1,17 +1,58 @@
 #!/usr/bin/env node
-// 昆明理工大学 2026 宣讲会日报 —— 数据源：腾讯文档《2026宣讲会集锦》
+// 宣讲会日报：抓文档 → 抓每场详情页 → 打分推荐 → 生成 Markdown 和微信短文
 // 用法: node scripts/daily.mjs [YYYY-MM-DD]   默认取北京时间当天
+// 所有可调参数都在仓库根目录 settings.json，改配置不用改代码。
 import zlib from "node:zlib";
 import fs from "node:fs";
 import path from "node:path";
 
-const DOC_ID = "DRGFzVkJOZURwaVRs";
-const DOC_URL = "https://docs.qq.com/sheet/" + DOC_ID;
-const TAB = "BB08J2";
 const ROOT = process.cwd();
 const OUT_DIR = process.env.OUT_DIR ? path.resolve(process.env.OUT_DIR) : path.join(ROOT, "reports");
-const CACHE = path.join(ROOT, "scripts", "cache", "ids.json");
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
+/* ---------- 0. 配置 ---------- */
+const DEFAULTS = {
+  sheetUrl: "https://docs.qq.com/sheet/DRGFzVkJOZURwaVRs",
+  sheetTab: "BB08J2",
+  targetMajor: "计算机科学与技术",
+  targetMajorLabel: "计算机",
+  strongKeywords: ["计算机", "软件工程", "信息安全", "网络工程", "人工智能", "数据科学", "大数据", "物联网", "信息管理", "信息与计算", "智能科学"],
+  openKeywords: ["不限专业"],
+  weakKeywords: ["电子", "通信", "自动化", "电气", "控制", "仪器", "测控", "数学", "统计", "物理"],
+  weights: { strong: 3, open: 1.2, weak: 0.6, total: 0.15 },
+};
+
+function loadSettings() {
+  const f = path.join(ROOT, "settings.json");
+  if (!fs.existsSync(f)) return DEFAULTS;
+  try {
+    const user = JSON.parse(fs.readFileSync(f, "utf8"));
+    const w = { ...DEFAULTS.weights, ...(user.weights || {}) };
+    const merged = { ...DEFAULTS, ...user, weights: w };
+    for (const k of ["strongKeywords", "openKeywords", "weakKeywords"]) {
+      if (!Array.isArray(merged[k]) || !merged[k].length) merged[k] = DEFAULTS[k];
+    }
+    return merged;
+  } catch (e) {
+    console.error("[settings] 解析失败，使用默认配置: " + e.message);
+    return DEFAULTS;
+  }
+}
+
+const CFG = loadSettings();
+const DOC_URL = CFG.sheetUrl;
+const mDoc = DOC_URL.match(/\/sheet\/([A-Za-z0-9]+)/);
+if (!mDoc) throw new Error("settings.json 里的 sheetUrl 不是有效的腾讯文档表格链接: " + DOC_URL);
+const DOC_ID = mDoc[1];
+const TAB = (DOC_URL.match(/[?&]tab=([A-Za-z0-9]+)/) || [])[1] || CFG.sheetTab;
+const LABEL = CFG.targetMajorLabel || CFG.targetMajor;
+const CACHE = path.join(ROOT, "scripts", "cache", "ids-" + DOC_ID + ".json");
+
+const re = (arr) => new RegExp(arr.join("|"));
+const STRONG = re(CFG.strongKeywords);
+const OPEN = re(CFG.openKeywords);
+const WEAK = re(CFG.weakKeywords);
+const W = CFG.weights;
 
 /* ---------- 1. 从文档取宣讲会详情链接 ---------- */
 async function fetchDocIds() {
@@ -34,15 +75,17 @@ async function fetchDocIds() {
 async function idsWithCache() {
   try {
     const ids = await fetchDocIds();
-    if (!ids.length) throw new Error("no ids in document");
+    if (!ids.length) throw new Error("文档里没解析到宣讲会链接");
     fs.mkdirSync(path.dirname(CACHE), { recursive: true });
-    fs.writeFileSync(CACHE, JSON.stringify(ids, null, 2));
+    fs.writeFileSync(CACHE, JSON.stringify({ docId: DOC_ID, updated: new Date().toISOString(), ids }, null, 2));
     console.error("[doc] " + ids.length + " 条宣讲会链接（已更新缓存）");
     return ids;
   } catch (e) {
     console.error("[doc] 抓取失败，改用缓存: " + String(e.message || e));
-    if (!fs.existsSync(CACHE)) throw new Error("文档抓取失败且无缓存可用");
-    const ids = JSON.parse(fs.readFileSync(CACHE, "utf8"));
+    if (!fs.existsSync(CACHE)) throw new Error("文档抓取失败，且没有可用的缓存 " + CACHE);
+    const raw = JSON.parse(fs.readFileSync(CACHE, "utf8"));
+    const ids = Array.isArray(raw) ? raw : (raw.docId === DOC_ID ? raw.ids : []);
+    if (!ids.length) throw new Error("缓存不属于当前文档（" + DOC_ID + "），请先成功运行一次");
     console.error("[cache] " + ids.length + " 条链接");
     return ids;
   }
@@ -100,11 +143,7 @@ async function fetchCareer(id) {
   }
 }
 
-/* ---------- 3. 打分：计算机科学与技术应届生 ---------- */
-const STRONG = /计算机|软件工程|信息安全|网络工程|人工智能|数据科学|大数据|物联网|信息管理|信息与计算|智能科学/;
-const OPEN = /不限专业/;
-const WEAK = /电子|通信|自动化|电气|控制|仪器|测控|数学|统计|物理/;
-
+/* ---------- 3. 打分 ---------- */
 function splitTime(t) {
   const m = (t || "").match(/(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2}:\d{2})?/);
   if (!m) return { date: "日期待定", hm: "", raw: t };
@@ -126,15 +165,17 @@ function scoreEvent(ev) {
     else if (k === "open") open += j.num;
     else if (k === "weak") weak += j.num;
   }
-  return { ...ev, strong, open, weak, csNum: strong + open, score: Math.round((strong * 3 + open * 1.2 + weak * 0.6 + ev.totalNum * 0.15) * 10) / 10 };
+  const csNum = strong + open;
+  const score = strong * W.strong + open * W.open + weak * W.weak + ev.totalNum * W.total;
+  return { ...ev, strong, open, weak, csNum, score: Math.round(score * 10) / 10 };
 }
 function majorsShort(ev) {
   const tags = new Set();
   for (const j of ev.jobs) {
     const k = classify(j);
-    if (k === "strong") for (const x of j.major.match(/计算机|软件工程|信息安全|网络工程|人工智能|数据科学|大数据|物联网|信息管理/g) || []) tags.add(x);
-    else if (k === "open") tags.add("不限专业");
-    else if (k === "weak") for (const x of j.major.match(/电子|通信|自动化|电气|控制|测控/g) || []) tags.add(x);
+    if (k === "strong") for (const x of j.major.match(STRONG) || []) tags.add(x);
+    else if (k === "open") tags.add(CFG.openKeywords[0]);
+    else if (k === "weak") for (const x of j.major.match(WEAK) || []) tags.add(x);
     else if (j.major) tags.add(j.major.split(/[，,、\/]/)[0].slice(0, 8));
   }
   return [...tags].slice(0, 6).join("、") || "见详情";
@@ -202,15 +243,15 @@ async function main() {
     const best = ranked[0];
     L.push("## 今日推荐：" + best.company + "（" + best.hm + "）", "");
     L.push("- 地点：" + addr(best));
-    L.push("- 招聘人数：" + best.totalNum + " 人（计算机/不限专业可投 " + best.csNum + " 人）");
+    L.push("- 招聘人数：" + best.totalNum + " 人（" + LABEL + "/不限专业可投 " + best.csNum + " 人）");
     L.push("- 专业要求：" + best.majorsShort);
     const why = [];
-    if (best.strong > 0) why.push("明确招收计算机类专业约 " + best.strong + " 人");
-    if (best.open > 0) why.push("不限专业岗位约 " + best.open + " 人，计算机专业可直接投");
+    if (best.strong > 0) why.push("明确招收" + LABEL + "类专业约 " + best.strong + " 人");
+    if (best.open > 0) why.push("不限专业岗位约 " + best.open + " 人，可直接投");
     why.push(best.totalNum >= 60 ? "全场招 " + best.totalNum + " 人，当天规模最大一档" : "当天全场共招 " + best.totalNum + " 人");
     L.push("- 推荐理由：综合“招聘人数 + 专业相关度”打分最高（" + best.score + " 分）；" + why.join("；"));
     const aj = best.jobs.filter((j) => ["strong", "open"].includes(classify(j))).sort((a, b) => b.num - a.num).slice(0, 5);
-    if (aj.length) { L.push("- 计算机专业可投岗位："); for (const j of aj) L.push("  - " + j.name + "｜" + j.num + " 人｜" + (j.major || "专业不限")); }
+    if (aj.length) { L.push("- " + LABEL + "专业可投岗位："); for (const j of aj) L.push("  - " + j.name + "｜" + j.num + " 人｜" + (j.major || "专业不限")); }
     if (best.signEnd) L.push("- 报名截止：" + best.signEnd + "（务必在此之前完成线上投递）");
     L.push("- 建议：提前 15 分钟到场，先投人数最多的岗位，再补投其他不限专业岗位。", "");
 
@@ -249,7 +290,7 @@ async function main() {
     const best = ranked[0];
     W.push("", "⭐ 今日推荐：" + best.company + " " + best.hm);
     W.push("   地点：" + addr(best));
-    W.push("   规模：" + best.totalNum + " 人（计算机/不限可投 " + best.csNum + " 人）｜专业：" + best.majorsShort);
+    W.push("   规模：" + best.totalNum + " 人（" + LABEL + "/不限可投 " + best.csNum + " 人）｜专业：" + best.majorsShort);
     const aj = best.jobs.filter((j) => ["strong", "open"].includes(classify(j))).sort((a, b) => b.num - a.num).slice(0, 3);
     if (aj.length) W.push("   可投：" + aj.map((j) => j.name + "(" + j.num + ")").join("、"));
     W.push("   理由：人数×专业相关度综合最高（" + best.score + " 分）");

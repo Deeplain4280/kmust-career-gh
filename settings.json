@@ -1,0 +1,40 @@
+{
+  "sheetUrl": "https://docs.qq.com/sheet/DRGFzVkJOZURwaVRs",
+  "sheetTab": "BB08J2",
+  "targetMajor": "计算机科学与技术",
+  "targetMajorLabel": "计算机",
+  "strongKeywords": [
+    "计算机",
+    "软件工程",
+    "信息安全",
+    "网络工程",
+    "人工智能",
+    "数据科学",
+    "大数据",
+    "物联网",
+    "信息管理",
+    "信息与计算",
+    "智能科学"
+  ],
+  "openKeywords": [
+    "不限专业"
+  ],
+  "weakKeywords": [
+    "电子",
+    "通信",
+    "自动化",
+    "电气",
+    "控制",
+    "仪器",
+    "测控",
+    "数学",
+    "统计",
+    "物理"
+  ],
+  "weights": {
+    "strong": 3,
+    "open": 1.2,
+    "weak": 0.6,
+    "total": 0.15
+  }
+}

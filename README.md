@@ -1,49 +1,190 @@
-# 昆工宣讲会日报（GitHub Actions 托管）
+# 宣讲会日报机器人
 
-每天北京时间 07:30 由 GitHub Actions 自动运行：
-抓取腾讯文档《2026宣讲会集锦》→ 解析每行"宣讲会详情"链接 → 抓详情页拿到公司/时间/地点/人数/专业 →
-按"计算机科学与技术应届生"打分（人数多 + 专业相关）给出当日推荐 → 通过 Server酱 推送到微信。
+每天自动看一眼腾讯文档里的**宣讲会/招聘会表格**，把「今天有哪些场次」整理成一条微信消息发给你，
+并替指定专业的学生挑出**最值得去的那一场**。
 
-不依赖你的电脑开机，也不需要你自己的服务器。
+默认针对「计算机科学与技术」应届生，表格默认是昆明理工大学的《2026宣讲会集锦》。
+表格链接和推荐专业都能在配置文件里改，**不需要动代码**。
 
-## 一次性配置（5 分钟）
-1. 新建 GitHub 仓库（建议 **Private**，避免日报内容公开），把本目录内容推上去：
-   ```bash
-   cd kmust-career-gh
-   git init && git add -A && git commit -m "init: career daily"
-   git branch -M main
-   git remote add origin https://github.com/<你的用户名>/<仓库名>.git
-   git push -u origin main
-   ```
-   > 没有 git 环境也可以：在仓库页面 "Add file → Upload files"，把 `.github`、`scripts`、`README.md`、`.gitignore` 拖进去提交。
+> 示例：每天北京时间 07:30 你会收到这样一条微信 👇
+>
+> ```
+> 📣 2026-10-21 昆工宣讲会（共 5 场）
+>
+> 1. 09:30 宣威德康生猪养殖有限公司
+>    呈贡校区人才市场104｜37人｜不限专业
+> 2. 14:00 深圳市德方纳米科技股份有限公司
+>    呈贡校区人才市场103｜73人｜化学、不限专业、信息管理…
+> 3. 16:30 天职国际会计师事务所云南分所
+>    呈贡校区人才市场103｜90人｜不限专业
+>
+> ⭐ 今日推荐：天职国际会计师事务所云南分所 16:30
+>    规模：90 人（计算机/不限可投 90 人）｜专业：不限专业
+>    可投：税务顾问(30)、咨询顾问(30)、财务审计助理(30)
+>    ⏰ 报名截止：2026-10-21 16:30
+>
+> 备选：得力集团有限公司 19:00｜86人｜自动化、电子、不限专业…
+> ```
 
-2. 加 Secret：仓库 **Settings → Secrets and variables → Actions → New repository secret**
-   - Name: `SERVERCHAN_KEY`
-   - Secret: 你的 Server酱 SendKey（`SCT...`）
+## 它每天做什么
 
-3. 打开 Actions：仓库 **Actions** 标签 → 若提示启用就点 **I understand my workflows, go ahead and enable them**
+1. 打开配置里的腾讯文档表格（公开可读、无需登录）
+2. 找出表格里每一行的「宣讲会详情」链接，逐个打开，读出**公司、时间、地点、招聘人数、专业要求**
+3. 只保留**今天**的场次；用「招聘人数多 + 专业相关」打分，选出推荐一场，再给一个备选
+4. 通过 Server酱 把消息推到你的微信；同时把完整日报存成文件
 
-4. 手动跑一次验证：**Actions → 宣讲会日报 → Run workflow**（date 留空即今天）
+全程跑在 **GitHub 的服务器**上，你的电脑开不开机都没关系。
 
-## 定时说明
-- `cron: "30 23 * * *"` = UTC 23:30 = **北京时间次日 07:30**
-- GitHub 定时任务只会在**默认分支**上运行；高峰期可能延迟几分钟到几十分钟
-- **公开仓库连续 60 天无提交会被自动停用定时任务**：每月手动 Run 一次，或随便提交一次即可恢复（Private 仓库不适用该限制）
-- 想改时间：编辑 `.github\workflows\daily.yml` 里 cron（UTC 时间 = 北京时间 - 8 小时）
+## 快速开始（约 5 分钟）
 
-## 文件
-- `scripts/daily.mjs`：抓取 + 打分 + 生成 Markdown 与微信短文（`reports/latest.msg.md`）
-- `scripts/notify.mjs`：推送到微信（Server酱，兼容 Turbo 与 ③；也可切企业微信/PushPlus/WxPusher）
-- `scripts/cache/ids.json`：文档里全部 101 条宣讲会链接的缓存，文档接口异常时兜底
-- 产物：每次运行上传 artifact（含 `reports/最新日报.md`），失败会推送 ⚠️ 告警到微信并让 Action 标红
+### 1. Fork 这个仓库
+点右上角 **Fork**（也可以直接用它当模板新建自己的仓库）。
 
-## 本地调试
-```bash
-node scripts/daily.mjs 2026-10-21     # 只生成
-SERVERCHAN_KEY=SCTxxx node scripts/notify.mjs --dry   # 只预览不发送
+### 2. 申请一个 Server酱 的 Key（用来收微信）
+- 手机微信打开 <https://sct.ftqq.com> ，扫码登录
+- 页面上会显示一串 **SendKey**（形如 `SCT123456T...`），复制下来
+- 免费版每天 5 条消息，我们每天只发 1 条，够用
+
+### 3. 把 Key 存进 GitHub（不要写进代码）
+自己的仓库 → **Settings → Secrets and variables → Actions → New repository secret**
+
+| Name | Secret |
+| --- | --- |
+| `SERVERCHAN_KEY` | 粘贴你的 SendKey |
+
+### 4. 打开 Actions 并手动跑一次
+- 仓库顶部 **Actions** → 如果提示，点 *I understand my workflows, go ahead and enable them*
+- 左侧选 **宣讲会日报** → 右侧 **Run workflow** → 再点绿色按钮
+- 等 1~2 分钟，变绿即成功，微信应该同时收到消息
+
+之后每天北京时间 **07:30** 会自动跑一次，不用再管。
+
+## 改表格链接（不用改代码）
+
+打开仓库根目录的 **settings.json**，改第一行：
+
+```json
+"sheetUrl": "https://docs.qq.com/sheet/DRGFzVkJOZURwaVRs"
 ```
 
-## 数据来源与方法
-文档 https://docs.qq.com/sheet/DRGFzVkJOZURwaVRs 公开可读、无需登录。腾讯文档表格接口返回的是压缩后的表格二进制，
-值池与单元格无法可靠对齐；因此改用文档每行"宣讲会详情"富文本中的链接 `job.kmust.edu.cn/detail/career?id=N`，
-从其 `window.PAGE_DATA` 读取精确字段。范围严格限定在该文档出现的场次内。
+注意三点：
+
+1. 链接形如 `https://docs.qq.com/sheet/一串ID`，从浏览器地址栏直接复制即可
+2. 表格必须是**任何人可查看**（文档右上角「分享」里设为公开，或至少知道链接的人可读），否则抓不到
+3. 表格里每场宣讲会那一行，要有指向详情页的**超链接**（本工具就是顺着这些链接去读公司/人数/专业的）。
+   如果你的表格只有文字没有链接，就拿不到这些字段
+4. 换文档后不用清缓存，第一次运行会自动生成新的 `scripts/cache/ids-<文档ID>.json`
+
+> 如果表格在子表（工作表）上：链接里带 `?tab=xxxx` 参数时会自动识别；没有的话把子表 ID 填到 `sheetTab`。
+
+## 改推荐专业（不用改代码）
+
+还是 **settings.json**：
+
+| 字段 | 作用 | 例子 |
+| --- | --- | --- |
+| `targetMajor` | 你的专业全名，用于说明 | `"计算机科学与技术"` |
+| `targetMajorLabel` | 消息里显示的简称 | `"计算机"` |
+| `strongKeywords` | 这个专业的**对口关键词**（命中算强相关） | `["计算机","软件工程","人工智能"]` |
+| `openKeywords` | 不限专业的说法 | `["不限专业"]` |
+| `weakKeywords` | 沾边关键词（命中算弱相关） | `["电子","通信","自动化"]` |
+| `weights` | 打分权重 | 见下 |
+
+打分公式（越高的越推荐）：
+
+```
+得分 = 强相关岗位人数 × 3
+     + 不限专业岗位人数 × 1.2
+     + 弱相关岗位人数 × 0.6
+     + 全场招聘总人数 × 0.15
+```
+
+**换成会计专业的例子**（把这段覆盖 settings.json 里对应字段即可）：
+
+```json
+"targetMajor": "会计学",
+"targetMajorLabel": "会计",
+"strongKeywords": ["会计", "财务", "审计", "税务"],
+"openKeywords": ["不限专业"],
+"weakKeywords": ["金融", "经济", "统计"],
+```
+
+想更看重「人数多」就把 `total` 调大（如 `0.3`）；更看重「专业对口」就把 `strong` 调大（如 `5`）。
+
+## 改推送时间
+
+编辑 `.github/workflows/daily.yml` 里的这一行：
+
+```yaml
+- cron: "30 23 * * *"   # UTC 时间！= 北京时间 - 8 小时
+```
+
+- 北京时间 07:30 → UTC 前一天 23:30 → `30 23 * * *`
+- 北京时间 08:00 → UTC 00:00 → `0 0 * * *`
+
+GitHub 的定时任务可能会有几分钟到几十分钟的延迟，属于正常现象。
+
+## 换推送渠道（可选）
+
+不想用 Server酱，也可以换成别的（在 Settings 里加对应 Secret 即可，代码不用改）：
+
+| 渠道 | 需要的 Secret | 说明 |
+| --- | --- | --- |
+| 企业微信群机器人 | `WECOM_WEBHOOK` | 群里加机器人，复制 webhook 地址 |
+| 企业微信应用消息 | `WECOM_CORPID` `WECOM_SECRET` `WECOM_AGENTID` | 可在微信里通过「微信插件」接收 |
+| PushPlus | `PUSHPLUS_TOKEN` | 关注公众号获取 token |
+| WxPusher | `WXPUSHER_APPTK` `WXPUSHER_UIDS` | 关注公众号获取 |
+| Server酱（默认） | `SERVERCHAN_KEY` | 最简单，推荐 |
+
+多个渠道可以同时配置，会一起发。
+
+## 常见问题
+
+**没收到微信消息？**
+1. 看 Actions 是否变绿；红了点进去看日志
+2. 检查 Secret 名字是不是 `SERVERCHAN_KEY`（大小写要一致）
+3. Server酱 免费版每天 5 条，超了会发不出来；去 sct.ftqq.com 看当天用量
+
+**第二天没有自动跑？**
+- 定时任务只在仓库的**默认分支**上生效（一般是 `main`）
+- **公开仓库连续 60 天没有任何提交，GitHub 会自动停用定时任务**；去 Actions 点一次 Run workflow 就能恢复
+- 想彻底避开这条限制：把仓库改成 Private（Actions 免费额度 2000 分钟/月，本任务每天约 1 分钟）
+
+**日志里说抓不到链接/数据？**
+- 表格是否公开可读；链接是否还有效
+- 表格里那一行是否真的带「宣讲会详情」超链接
+- 详情页是学校就业网（境内站点），GitHub 服务器偶尔会慢或连不上，通常重跑一次即可
+
+**数据准确性？**
+- 所有字段（公司/时间/地点/人数/专业）都来自表格里链接指向的**详情页原文**，不做推测
+- 只覆盖表格里出现的场次，不额外补充
+
+**日报存哪了？**
+- 每次运行的日报会作为 artifact 上传（Actions 页面里可下载），文件名 `YYYY-MM-DD-宣讲会日报.md`
+
+## 目录结构
+
+```
+settings.json               # 表格链接、目标专业、关键词、权重（改这里就够）
+.github/workflows/daily.yml # 定时时间、运行步骤
+scripts/daily.mjs           # 抓取 + 打分 + 生成日报
+scripts/notify.mjs          # 推送到微信
+scripts/cache/              # 文档链接缓存，防止临时抓取失败
+```
+
+## 本地试跑（可选）
+
+需要 Node.js 18+：
+
+```bash
+node scripts/daily.mjs 2026-10-21          # 只生成日报，不推送
+node scripts/notify.mjs --dry              # 只预览要推送的内容
+SERVERCHAN_KEY=SCTxxxx node scripts/notify.mjs   # 真的发一条
+```
+
+## 说明与免责
+
+- 本项目与学校、腾讯文档均无关系，只是把公开可读的表格整理成消息
+- 表格内容与版权归原作者所有；请勿用于商业用途
+- 宣讲会信息以原始表格/详情页为准，本项目仅做整理和排序
+- 许可：[Apache-2.0](LICENSE)
