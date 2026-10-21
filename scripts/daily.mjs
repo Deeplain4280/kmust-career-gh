@@ -68,10 +68,11 @@ async function fetchCareer(id) {
   for (let a = 0; a < 3; a++) {
     try {
       const ctl = new AbortController();
-      const t = setTimeout(() => ctl.abort(), 25000);
+      const t = setTimeout(() => ctl.abort(), 30000);
       const r = await fetch("http://job.kmust.edu.cn/detail/career?id=" + id, { headers: { "User-Agent": UA }, signal: ctl.signal });
       const html = await r.text();
       clearTimeout(t);
+      if (!r.ok) throw new Error("HTTP " + r.status);
       const pd = extractPageData(html);
       if (!pd?.career) throw new Error("no career data");
       const c = pd.career;
@@ -149,9 +150,20 @@ async function main() {
   const ids = await idsWithCache();
   const all = [];
   let idx = 0;
-  await Promise.all(Array.from({ length: 6 }, async () => {
+  await Promise.all(Array.from({ length: 5 }, async () => {
     while (idx < ids.length) { const id = ids[idx++]; all.push(await fetchCareer(id)); }
   }));
+
+  // 跨网访问可能抖动：对失败项再串行重试一轮
+  const retryIds = all.filter((c) => c.error).map((c) => c.id);
+  if (retryIds.length && retryIds.length < all.length) {
+    console.error("[retry] 重试 " + retryIds.length + " 条失败链接");
+    for (const id of retryIds) {
+      const again = await fetchCareer(id);
+      const i = all.findIndex((c) => c.id === id);
+      if (i >= 0 && !again.error) all[i] = again;
+    }
+  }
 
   const ok = all.filter((c) => !c.error).map((c) => ({ ...c, ...splitTime(c.time) }));
   ok.forEach((e) => { e.majorsShort = majorsShort(e); });
