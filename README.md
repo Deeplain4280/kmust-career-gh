@@ -1,5 +1,7 @@
 # 宣讲会日报机器人
 
+简体中文 | [English](README.en.md)
+
 每天自动看一眼腾讯文档里的**宣讲会/招聘会表格**，把「今天有哪些场次」整理成一条微信消息发给你，
 并替指定专业的学生挑出**最值得去的那一场**。
 
@@ -181,6 +183,11 @@ node scripts/daily.mjs 2026-10-21          # 只生成日报，不推送
 node scripts/notify.mjs --dry              # 只预览要推送的内容
 SERVERCHAN_KEY=SCTxxxx node scripts/notify.mjs   # 真的发一条
 ```
+
+## 参与贡献
+
+欢迎 Issue / PR：适配其他学校的表格、新增推送渠道（钉钉、飞书、Bark 等）、改进文档都很有用。
+提交前请先看 [CONTRIBUTING.md](CONTRIBUTING.md)（本地怎么跑、不要提交哪些东西、代码约定）。
 
 ## 说明与免责
 
