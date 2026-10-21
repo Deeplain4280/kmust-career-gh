@@ -1,0 +1,61 @@
+name: 宣讲会日报
+
+on:
+  schedule:
+    # 07:30 Asia/Shanghai = 23:30 UTC 前一天
+    - cron: "30 23 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "报告日期 YYYY-MM-DD（留空=北京时间今天）"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: career-daily
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 网络连通性检查
+        run: |
+          for u in "https://docs.qq.com/sheet/DRGFzVkJOZURwaVRs" "http://job.kmust.edu.cn/detail/career?id=725352"; do
+            echo "== $u"
+            curl -sS -o /dev/null -w "http=%{http_code} time=%{time_total}s\n" --max-time 30 "$u" || echo "curl failed"
+          done
+
+      - name: 生成日报
+        env:
+          OUT_DIR: reports
+        run: node scripts/daily.mjs "${{ inputs.date }}"
+
+      - name: 推送到微信（Server酱）
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: node scripts/notify.mjs
+
+      - name: 日志摘要
+        if: always()
+        run: |
+          if [ -f reports/latest.md ]; then cat reports/latest.md >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -f reports/run.log ]; then tail -40 reports/run.log || true; fi
+
+      - name: 保存日报
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: career-report-${{ github.run_number }}
+          path: reports/
+          if-no-files-found: warn
